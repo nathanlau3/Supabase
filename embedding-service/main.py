@@ -1,0 +1,31 @@
+"""
+Separate embedding service to avoid Supabase Edge Function CPU limits.
+Run this alongside your Supabase instance.
+
+Install: pip install fastapi uvicorn sentence-transformers
+Run: uvicorn main:app --host 0.0.0.0 --port 8001
+"""
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+from sentence_transformers import SentenceTransformer
+from typing import List
+
+app = FastAPI()
+
+# Load model once at startup
+model = SentenceTransformer('Supabase/gte-small')
+
+class EmbedRequest(BaseModel):
+    texts: List[str]
+
+@app.post("/embed")
+async def create_embeddings(request: EmbedRequest):
+    embeddings = model.encode(request.texts, normalize_embeddings=True)
+    return {
+        "embeddings": embeddings.tolist()
+    }
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

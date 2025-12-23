@@ -1,17 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
-import { env, pipeline } from '@xenova/transformers';
-
-// Configuration for Deno runtime
-env.useBrowserCache = false;
-env.allowLocalModels = false;
-
-const generateEmbedding = await pipeline(
-  'feature-extraction',
-  'Supabase/gte-small'
-);
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+const embeddingServiceUrl = Deno.env.get('EMBEDDING_SERVICE_URL') || 'http://host.docker.internal:8001';
 
 Deno.serve(async (req) => {
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -64,20 +55,44 @@ Deno.serve(async (req) => {
     });
   }
 
-  for (const row of rows) {
-    const { id, [contentColumn]: content } = row;
+  // Batch all texts together for efficient processing
+  const textsToEmbed = rows
+    .map(row => row[contentColumn])
+    .filter(content => content);
 
-    if (!content) {
-      console.error(`No content available in column '${contentColumn}'`);
-      continue;
-    }
-
-    const output = await generateEmbedding(content, {
-      pooling: 'mean',
-      normalize: true,
+  if (textsToEmbed.length === 0) {
+    return new Response(null, {
+      status: 204,
+      headers: { 'Content-Type': 'application/json' },
     });
+  }
 
-    const embedding = JSON.stringify(Array.from(output.data));
+  // Call external embedding service running on your M3 Mac
+  const embeddingResponse = await fetch(`${embeddingServiceUrl}/embed`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ texts: textsToEmbed }),
+  });
+
+  if (!embeddingResponse.ok) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to generate embeddings' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  const { embeddings } = await embeddingResponse.json();
+
+  // Update rows with embeddings
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const { id } = row;
+    const embedding = JSON.stringify(embeddings[i]);
 
     const { error } = await supabase
       .from(table)
