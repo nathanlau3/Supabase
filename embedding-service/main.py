@@ -14,7 +14,9 @@ from typing import List
 app = FastAPI()
 
 # Load model once at startup
-model = SentenceTransformer('Supabase/gte-small')
+# Using multilingual-e5-small: Better multilingual performance, excellent Indonesian support
+# Still 384 dimensions (same as gte-small), so no DB schema changes needed
+model = SentenceTransformer('intfloat/multilingual-e5-small')
 
 class EmbedRequest(BaseModel):
     texts: List[str]

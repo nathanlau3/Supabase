@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "jsr:@supabase/supabase-js@2",
+    "ai": "npm:ai@^4.0.38",
+    "@ai-sdk/openai": "npm:@ai-sdk/openai@^1.0.10",
+    "common-tags": "npm:common-tags@^1.8.2"
+  }
+}
