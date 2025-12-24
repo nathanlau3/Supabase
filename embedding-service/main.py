@@ -30,10 +30,18 @@ model = SentenceTransformer('intfloat/multilingual-e5-small')
 
 class EmbedRequest(BaseModel):
     texts: List[str]
+    text_type: str = "passage"  # "query" or "passage"
 
 @app.post("/embed")
 async def create_embeddings(request: EmbedRequest):
-    embeddings = model.encode(request.texts, normalize_embeddings=True)
+    # multilingual-e5-small requires prefixes for optimal performance
+    # Use "query: " for search queries and "passage: " for documents
+    if request.text_type == "query":
+        prefixed_texts = [f"query: {text}" for text in request.texts]
+    else:  # passage (default)
+        prefixed_texts = [f"passage: {text}" for text in request.texts]
+
+    embeddings = model.encode(prefixed_texts, normalize_embeddings=True)
     return {
         "embeddings": embeddings.tolist()
     }

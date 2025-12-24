@@ -5,11 +5,16 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useChat } from "ai/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
+import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 
 export default function ChatPage() {
   const supabase = createClientComponentClient();
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [autoSpeak, setAutoSpeak] = useState(false);
+  const inputRef = useRef<string>("");
 
   useEffect(() => {
     const getSession = async () => {
@@ -23,19 +28,147 @@ export default function ChatPage() {
     getSession();
   }, [supabase]);
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading } =
-    useChat({
-      api: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/chat`,
-      headers: authToken
-        ? {
-            Authorization: `Bearer ${authToken}`,
-          }
-        : {},
-    });
+  const {
+    messages,
+    input,
+    handleInputChange,
+    handleSubmit,
+    isLoading,
+    setInput,
+  } = useChat({
+    api: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/chat`,
+    headers: authToken
+      ? {
+          Authorization: `Bearer ${authToken}`,
+        }
+      : {},
+  });
+
+  // Keep inputRef in sync with input state
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  // Create stable submit handler
+  const submitVoiceInput = useCallback(() => {
+    console.log("handleFinish called, current input:", inputRef.current);
+    // Only submit if there's text
+    if (inputRef.current && inputRef.current.trim().length > 0) {
+      const syntheticEvent = new Event('submit', { bubbles: true, cancelable: true });
+      handleSubmit(syntheticEvent as any);
+    }
+  }, [handleSubmit]);
+
+  // Speech Recognition (Speech-to-Text)
+  const {
+    isListening,
+    isSupported: isSpeechRecognitionSupported,
+    toggleListening,
+  } = useSpeechRecognition({
+    onResult: (transcript) => {
+      setInput(transcript);
+    },
+    onError: (error) => {
+      console.error("Speech recognition error:", error);
+    },
+    lang: "id-ID", // Indonesian
+    continuous: true, // Keep listening until manually stopped
+    handleFinish: submitVoiceInput,
+  });
+
+  // Speech Synthesis (Text-to-Speech)
+  const {
+    speak,
+    cancel,
+    isSpeaking,
+    isSupported: isSpeechSynthesisSupported,
+  } = useSpeechSynthesis({
+    lang: "id-ID", // Indonesian
+    rate: 1,
+    pitch: 1,
+    volume: 1,
+  });
+
+  // Auto-speak assistant responses
+  useEffect(() => {
+    if (autoSpeak && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === "assistant") {
+        speak(lastMessage.content);
+      }
+    }
+  }, [messages, autoSpeak, speak]);
 
   return (
     <div className="max-w-6xl flex flex-col items-center w-full h-full">
       <div className="flex flex-col w-full gap-6 grow my-2 sm:my-10 p-4 sm:p-8 sm:border rounded-sm overflow-y-auto">
+        {/* Speech Controls */}
+        <div className="flex items-center justify-between gap-4 p-2 border-b">
+          <div className="flex items-center gap-2">
+            {isSpeechRecognitionSupported ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={toggleListening}
+                className={cn(
+                  isListening && "bg-red-100 border-red-500 text-red-700",
+                )}
+              >
+                {isListening ? (
+                  <>
+                    <MicOff className="h-4 w-4 mr-2" />
+                    Stop Listening
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-4 w-4 mr-2" />
+                    Voice Input
+                  </>
+                )}
+              </Button>
+            ) : (
+              <p className="text-xs text-gray-500">Voice input not supported</p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isSpeechSynthesisSupported && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAutoSpeak(!autoSpeak)}
+                  className={cn(autoSpeak && "bg-green-100 border-green-500")}
+                >
+                  {autoSpeak ? (
+                    <>
+                      <Volume2 className="h-4 w-4 mr-2" />
+                      Auto-speak On
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="h-4 w-4 mr-2" />
+                      Auto-speak Off
+                    </>
+                  )}
+                </Button>
+                {isSpeaking && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={cancel}
+                  >
+                    Stop Speaking
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="border-slate-400 rounded-lg flex flex-col justify-start gap-4 pr-2 grow overflow-y-scroll">
           {messages.map(({ id, role, content }) => (
             <div
@@ -76,7 +209,7 @@ export default function ChatPage() {
           <Input
             type="text"
             autoFocus
-            placeholder="Send a message"
+            placeholder="Send a message or use voice input"
             value={input}
             onChange={handleInputChange}
           />

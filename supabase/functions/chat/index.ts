@@ -87,13 +87,14 @@ Deno.serve(async (req) => {
     console.log("Query variations:", queryVariations.length);
 
     // Generate embeddings for all query variations
+    // Using text_type: "query" for proper multilingual-e5-small prefix
     console.log("Fetching embeddings from:", embeddingServiceUrl);
     const embeddingResponse = await fetch(`${embeddingServiceUrl}/embed`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ texts: queryVariations }),
+      body: JSON.stringify({ texts: queryVariations, text_type: "query" }),
     });
 
     console.log("Embedding response status:", embeddingResponse.status);
@@ -211,6 +212,127 @@ Deno.serve(async (req) => {
         messages: messages,
         maxTokens: 1024,
         temperature: 0,
+        tools: {
+          count_reports: {
+            description: "Count reports from the database. Use this for questions like 'how many reports', 'berapa jumlah laporan', 'total laporan', etc. Can filter by category, location (polda/polres), or officer name.",
+            parameters: {
+              type: "object",
+              properties: {
+                category: {
+                  type: "string",
+                  description: "Filter by report category name (e.g., 'Pungli', 'Premanisme')",
+                },
+                polda_name: {
+                  type: "string",
+                  description: "Filter by Polda name",
+                },
+                polres_name: {
+                  type: "string",
+                  description: "Filter by Polres name",
+                },
+                officer_name: {
+                  type: "string",
+                  description: "Filter by officer name",
+                },
+              },
+            },
+            execute: async ({ category, polda_name, polres_name, officer_name }: {
+              category?: string;
+              polda_name?: string;
+              polres_name?: string;
+              officer_name?: string;
+            }) => {
+              console.log("Executing count_reports tool with filters:", { category, polda_name, polres_name, officer_name });
+
+              let query = supabase.from("view_report_officer").select("*", { count: "exact", head: true });
+
+              if (category) {
+                query = query.ilike("report_category_name", `%${category}%`);
+              }
+              if (polda_name) {
+                query = query.ilike("polda_name", `%${polda_name}%`);
+              }
+              if (polres_name) {
+                query = query.ilike("polres_name", `%${polres_name}%`);
+              }
+              if (officer_name) {
+                query = query.ilike("officer_name", `%${officer_name}%`);
+              }
+
+              const { count, error } = await query;
+
+              if (error) {
+                console.error("Count error:", error);
+                return { error: error.message };
+              }
+
+              return { count: count || 0, filters: { category, polda_name, polres_name, officer_name } };
+            },
+          },
+          get_report_stats: {
+            description: "Get aggregated statistics about reports. Use for questions about report distribution, top categories, top locations, etc.",
+            parameters: {
+              type: "object",
+              properties: {
+                group_by: {
+                  type: "string",
+                  enum: ["category", "polda", "polres", "officer"],
+                  description: "What to group the reports by",
+                },
+                limit: {
+                  type: "number",
+                  description: "Maximum number of results to return (default 10)",
+                },
+              },
+              required: ["group_by"],
+            },
+            execute: async ({ group_by, limit = 10 }: { group_by: string; limit?: number }) => {
+              console.log("Executing get_report_stats tool:", { group_by, limit });
+
+              const columnMap: Record<string, string> = {
+                category: "report_category_name",
+                polda: "polda_name",
+                polres: "polres_name",
+                officer: "officer_name",
+              };
+
+              const column = columnMap[group_by];
+              if (!column) {
+                return { error: "Invalid group_by parameter" };
+              }
+
+              const { data, error } = await supabase
+                .from("view_report_officer")
+                .select(column);
+
+              if (error) {
+                console.error("Stats error:", error);
+                return { error: error.message };
+              }
+
+              if (!data) {
+                return { group_by, stats: [], total_groups: 0 };
+              }
+
+              // Count occurrences
+              const counts: Record<string, number> = {};
+              for (const row of data) {
+                const value = (row as unknown as Record<string, string>)[column];
+                if (value) {
+                  counts[value] = (counts[value] || 0) + 1;
+                }
+              }
+
+              // Convert to array and sort
+              const stats = Object.entries(counts)
+                .map(([name, count]) => ({ name, count }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, limit);
+
+              return { group_by, stats, total_groups: stats.length };
+            },
+          },
+        },
         onFinish({ finishReason, usage }) {
           console.log("Stream finished:", { finishReason, usage });
         },

@@ -84,26 +84,47 @@ Deno.serve(async (req) => {
   console.log(`Syncing ${reports.length} reports...`);
 
   // Generate searchable content for each report
+  // Using more natural language for better semantic search
   const searchableContents = reports.map((report) => {
-    const parts = [
-      `Kategori: ${report.report_category_name || ""}`,
-      `Petugas: ${report.officer_name || ""}`,
-      `Lokasi: ${report.address || ""}`,
-      `Polda: ${report.polda_name || ""}`,
-      `Polres: ${report.polres_name || ""}`,
-      `Deskripsi: ${report.description || ""}`,
-    ];
-    return parts.filter((p) => p.split(": ")[1]).join(" | ");
+    const parts = [];
+
+    // Use natural Indonesian sentences
+    if (report.report_category_name) {
+      parts.push(`Laporan ${report.report_category_name}`);
+    }
+
+    if (report.description) {
+      parts.push(report.description);
+    }
+
+    if (report.officer_name) {
+      parts.push(`Petugas ${report.officer_name}`);
+    }
+
+    if (report.address) {
+      parts.push(`Lokasi ${report.address}`);
+    }
+
+    if (report.polda_name) {
+      parts.push(`Polda ${report.polda_name}`);
+    }
+
+    if (report.polres_name) {
+      parts.push(`Polres ${report.polres_name}`);
+    }
+
+    return parts.filter(Boolean).join(". ");
   });
 
   // Generate embeddings in batch
+  // Using text_type: "passage" for document embeddings (default)
   console.log("Generating embeddings...");
   const embeddingResponse = await fetch(`${embeddingServiceUrl}/embed`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ texts: searchableContents }),
+    body: JSON.stringify({ texts: searchableContents, text_type: "passage" }),
   });
 
   if (!embeddingResponse.ok) {
