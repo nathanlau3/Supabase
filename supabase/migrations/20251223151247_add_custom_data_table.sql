@@ -20,7 +20,14 @@ alter table report_embeddings enable row level security;
 create policy "Authenticated users can read report embeddings"
 on report_embeddings for select to authenticated using (true);
 
--- Policy: Service role can insert/update embeddings (for triggers)
+-- Policy: Authenticated users can insert/update embeddings
+create policy "Authenticated users can insert report embeddings"
+on report_embeddings for insert to authenticated with check (true);
+
+create policy "Authenticated users can update report embeddings"
+on report_embeddings for update to authenticated using (true);
+
+-- Policy: Service role can manage all embeddings
 create policy "Service role can manage embeddings"
 on report_embeddings for all to service_role using (true);
 
@@ -50,7 +57,7 @@ $$;
 
 -- Function to match both documents AND reports
 create or replace function match_all_content(
-  embedding vector(384),
+  query_embedding vector(384),
   match_threshold float,
   match_count int default 10
 )
@@ -69,9 +76,9 @@ begin
     ds.id,
     ds.content,
     'document'::text as source_type,
-    (1 - (ds.embedding <=> embedding))::float as similarity
+    (1 - (ds.embedding <=> query_embedding))::float as similarity
   from document_sections ds
-  where 1 - (ds.embedding <=> embedding) > match_threshold
+  where 1 - (ds.embedding <=> query_embedding) > match_threshold
 
   union all
 
@@ -80,9 +87,9 @@ begin
     re.id,
     re.searchable_content as content,
     'report'::text as source_type,
-    (1 - (re.embedding <=> embedding))::float as similarity
+    (1 - (re.embedding <=> query_embedding))::float as similarity
   from report_embeddings re
-  where 1 - (re.embedding <=> embedding) > match_threshold
+  where 1 - (re.embedding <=> query_embedding) > match_threshold
 
   order by similarity desc
   limit match_count;
@@ -91,7 +98,7 @@ $$;
 
 -- Function to match only reports
 create or replace function match_reports(
-  embedding vector(384),
+  query_embedding vector(384),
   match_threshold float,
   match_count int default 5
 )
@@ -109,9 +116,9 @@ begin
     re.id,
     re.report_id,
     re.searchable_content as content,
-    (1 - (re.embedding <=> embedding))::float as similarity
+    (1 - (re.embedding <=> query_embedding))::float as similarity
   from report_embeddings re
-  where 1 - (re.embedding <=> embedding) > match_threshold
+  where 1 - (re.embedding <=> query_embedding) > match_threshold
   order by similarity desc
   limit match_count;
 end;

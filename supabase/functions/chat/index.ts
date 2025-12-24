@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
     const searchPromises = embeddings.map((embedding: number[]) =>
       supabase
         .rpc("match_all_content", {
-          embedding,
+          query_embedding: embedding,
           match_threshold: matchThreshold,
           match_count: 10,
         })
