@@ -1,15 +1,76 @@
-import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL");
-const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-const embeddingServiceUrl =
-  Deno.env.get("EMBEDDING_SERVICE_URL") || "http://host.docker.internal:8001";
+import { createClient } from "@supabase/supabase-js";
+import { loadConfig } from "./lib/config.ts";
+import { EmbeddingService } from "./services/embedding-service.ts";
+import { DocumentRepository } from "./repositories/document-repository.ts";
+import type { EmbedRequest } from "./types/index.ts";
 
 Deno.serve(async (req) => {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  try {
+    const config = loadConfig();
+
+    const authorization = req.headers.get("Authorization");
+    if (!authorization) {
+      console.error("No authorization header");
+      return new Response(
+        JSON.stringify({ error: "No authorization header passed" }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+      global: { headers: { authorization } },
+      auth: { persistSession: false },
+    });
+
+    const { ids, table, contentColumn, embeddingColumn }: EmbedRequest = await req.json();
+    console.log("Received embed request:", { table, ids: ids.length, contentColumn, embeddingColumn });
+
+    const documentRepository = new DocumentRepository(supabase);
+    const embeddingService = new EmbeddingService(config.embeddingServiceUrl);
+
+    const rows = await documentRepository.getDocumentsWithoutEmbeddings(
+      table,
+      ids,
+      contentColumn,
+      embeddingColumn
+    );
+
+    const textsToEmbed = rows
+      .map((row) => row[contentColumn])
+      .filter((content) => content);
+
+    if (textsToEmbed.length === 0) {
+      console.log("No documents to embed");
+      return new Response(null, {
+        status: 204,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const embeddings = await embeddingService.generateEmbeddings(textsToEmbed);
+
+    const updates = rows.map((row, i) => ({
+      id: row.id,
+      embedding: embeddings[i],
+    }));
+
+    await documentRepository.updateEmbeddings(table, updates, embeddingColumn);
+
+    console.log(`Successfully embedded ${updates.length} documents`);
+    return new Response(null, {
+      status: 204,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("Unexpected error in embed function:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
       JSON.stringify({
-        error: "Missing environment variables.",
+        error: "An unexpected error occurred: " + errorMessage,
       }),
       {
         status: 500,
@@ -17,117 +78,4 @@ Deno.serve(async (req) => {
       },
     );
   }
-
-  const authorization = req.headers.get("Authorization");
-
-  if (!authorization) {
-    return new Response(
-      JSON.stringify({ error: `No authorization header passed` }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        authorization,
-      },
-    },
-    auth: {
-      persistSession: false,
-    },
-  });
-
-  const { ids, table, contentColumn, embeddingColumn } = await req.json();
-
-  const { data: rows, error: selectError } = await supabase
-    .from(table)
-    .select(`id, ${contentColumn}` as "*")
-    .in("id", ids)
-    .is(embeddingColumn, null);
-
-  if (selectError) {
-    return new Response(JSON.stringify({ error: selectError }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Batch all texts together for efficient processing
-  const textsToEmbed = rows
-    .map((row) => row[contentColumn])
-    .filter((content) => content);
-
-  if (textsToEmbed.length === 0) {
-    return new Response(null, {
-      status: 204,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Call external embedding service running on your M3 Mac
-  const embeddingResponse = await fetch(`${embeddingServiceUrl}/embed`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ texts: textsToEmbed }),
-  });
-
-  if (!embeddingResponse.ok) {
-    return new Response(
-      JSON.stringify({ error: "Failed to generate embeddings" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  const { embeddings } = await embeddingResponse.json();
-
-  // Update rows with embeddings in batch
-  const updates = rows.map((row, i) => ({
-    id: row.id,
-    embedding: embeddings[i], // Store as array, not JSON string
-  }));
-
-  // Update all rows in parallel for better performance
-  const updatePromises = updates.map(({ id, embedding }) =>
-    supabase
-      .from(table)
-      .update({
-        [embeddingColumn]: embedding,
-      })
-      .eq("id", id)
-  );
-
-  const results = await Promise.all(updatePromises);
-
-  // Log any errors
-  results.forEach((result, i) => {
-    if (result.error) {
-      console.error(
-        `Failed to save embedding on '${table}' table with id ${updates[i].id}:`,
-        result.error
-      );
-    } else {
-      console.log(
-        `Generated embedding ${JSON.stringify({
-          table,
-          id: updates[i].id,
-          contentColumn,
-          embeddingColumn,
-        })}`
-      );
-    }
-  });
-
-  return new Response(null, {
-    status: 204,
-    headers: { "Content-Type": "application/json" },
-  });
 });

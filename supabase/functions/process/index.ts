@@ -1,104 +1,73 @@
-import { createClient } from '@supabase/supabase-js';
-import { processMarkdown } from '../_lib/markdown-parser.ts';
 
-const supabaseUrl = Deno.env.get('SUPABASE_URL');
-const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+import { createClient } from "@supabase/supabase-js";
+import { loadConfig } from "./lib/config.ts";
+import { DocumentRepository } from "./repositories/document-repository.ts";
+import { StorageService } from "./services/storage-service.ts";
+import { MarkdownService } from "./services/markdown-service.ts";
+import type { ProcessRequest } from "./types/index.ts";
 
 Deno.serve(async (req) => {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  try {
+    const config = loadConfig();
+
+    const authorization = req.headers.get("Authorization");
+    if (!authorization) {
+      console.error("No authorization header");
+      return new Response(
+        JSON.stringify({ error: "No authorization header passed" }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+      global: { headers: { authorization } },
+      auth: { persistSession: false },
+    });
+
+    const { document_id }: ProcessRequest = await req.json();
+    console.log("Received process request for document:", document_id);
+
+    const documentRepository = new DocumentRepository(supabase);
+    const storageService = new StorageService(supabase);
+    const markdownService = new MarkdownService();
+
+    const document = await documentRepository.getDocumentById(document_id);
+
+    const fileContents = await storageService.downloadFile(
+      document.storage_object_path
+    );
+
+    const processedMd = markdownService.processContent(fileContents);
+
+    const sections = processedMd.sections.map(({ content }) => ({
+      document_id,
+      content,
+    }));
+
+    await documentRepository.saveSections(sections);
+
+    console.log(
+      `Successfully processed ${sections.length} sections for file '${document.name}'`
+    );
+
+    return new Response(null, {
+      status: 204,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("Unexpected error in process function:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return new Response(
       JSON.stringify({
-        error: 'Missing environment variables.',
+        error: "An unexpected error occurred: " + errorMessage,
       }),
       {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  const authorization = req.headers.get('Authorization');
-
-  if (!authorization) {
-    return new Response(
-      JSON.stringify({ error: `No authorization header passed` }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        authorization,
+        headers: { "Content-Type": "application/json" },
       },
-    },
-    auth: {
-      persistSession: false,
-    },
-  });
-
-  const { document_id } = await req.json();
-
-  const { data: document } = await supabase
-    .from('documents_with_storage_path')
-    .select()
-    .eq('id', document_id)
-    .single();
-
-  if (!document?.storage_object_path) {
-    return new Response(
-      JSON.stringify({ error: 'Failed to find uploaded document' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
     );
   }
-
-  const { data: file } = await supabase.storage
-    .from('files')
-    .download(document.storage_object_path);
-
-  if (!file) {
-    return new Response(
-      JSON.stringify({ error: 'Failed to download storage object' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  const fileContents = await file.text();
-  const processedMd = processMarkdown(fileContents);
-
-  const { error } = await supabase.from('document_sections').insert(
-    processedMd.sections.map(({ content }) => ({
-      document_id,
-      content,
-    }))
-  );
-
-  if (error) {
-    console.error(error);
-    return new Response(
-      JSON.stringify({ error: 'Failed to save document sections' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  console.log(
-    `Saved ${processedMd.sections.length} sections for file '${document.name}'`
-  );
-
-  return new Response(null, {
-    status: 204,
-    headers: { 'Content-Type': 'application/json' },
-  });
 });
