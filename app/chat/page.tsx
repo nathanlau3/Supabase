@@ -54,7 +54,10 @@ export default function ChatPage() {
     console.log("handleFinish called, current input:", inputRef.current);
     // Only submit if there's text
     if (inputRef.current && inputRef.current.trim().length > 0) {
-      const syntheticEvent = new Event('submit', { bubbles: true, cancelable: true });
+      const syntheticEvent = new Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      });
       handleSubmit(syntheticEvent as any);
     }
   }, [handleSubmit]);

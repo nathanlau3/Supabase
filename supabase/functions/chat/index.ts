@@ -1,21 +1,46 @@
+/// <reference lib="deno.ns" />
+
 import { createClient } from "@supabase/supabase-js";
 import { streamText } from "ai";
 import { codeBlock } from "common-tags";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
-const apiKey = Deno.env.get("OPENAI_API_KEY");
-console.log("OpenAI API Key available:", !!apiKey, "Length:", apiKey?.length);
+type LLMType = "gpt-3.5-turbo" | "llama3.1";
 
-const openai = createOpenAI({
-  apiKey: apiKey || "",
-});
-
-// These are automatically injected
+// Environment variables
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+const llmType: LLMType =
+  (Deno.env.get("LLM_TYPE") as LLMType) || "gpt-3.5-turbo";
 const embeddingServiceUrl =
   Deno.env.get("EMBEDDING_SERVICE_URL") || "http://host.docker.internal:8001";
+
+// OpenAI configuration
+const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+const openaiProvider = createOpenAI({
+  apiKey: openaiApiKey || "",
+});
+
+// Llama configuration (via ZeroTier)
+const llamaBaseUrl = Deno.env.get("LLAMA_BASE_URL"); // e.g., "http://your-zerotier-ip:11434"
+const llamaProvider = createOpenAI({
+  baseURL: llamaBaseUrl || "http://localhost:11434/v1",
+  apiKey: "ollama", // Ollama doesn't require real API key
+});
+
+// Helper function to get the appropriate model based on LLM type
+function getModel(type: LLMType) {
+  switch (type) {
+    case "gpt-3.5-turbo":
+      return openaiProvider("gpt-3.5-turbo");
+    case "llama3.1":
+      return llamaProvider("llama3.1");
+    default:
+      console.warn(`Unknown LLM type: ${type}, defaulting to gpt-3.5-turbo`);
+      return openaiProvider("gpt-3.5-turbo");
+  }
+}
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,7 +98,6 @@ Deno.serve(async (req) => {
     // Get the latest user message
     const lastMessage = messages[messages.length - 1];
     const userQuery = lastMessage?.content || "";
-    console.log("Original query:", userQuery);
 
     // QUERY ENHANCEMENT: Generate multiple query variations for better retrieval
     // This helps find relevant docs even if query wording doesn't match exactly
@@ -216,10 +240,10 @@ Deno.serve(async (req) => {
     ${injectedDocs}
   `;
 
-    console.log("Starting streamText with OpenAI");
+    console.log("Starting streamText with LLM:", llmType);
     try {
       const result = streamText({
-        model: openai("gpt-3.5-turbo"),
+        model: getModel(llmType),
         system: systemPrompt,
         messages: messages,
         maxTokens: 1024,
@@ -230,12 +254,24 @@ Deno.serve(async (req) => {
             description:
               "Count reports from the database. Use this for questions like 'how many reports', 'berapa jumlah laporan', 'total laporan', etc. Can filter by category, location (polda/polres), or officer name.",
             parameters: z.object({
-              category: z.string().optional().describe(
-                "Filter by report category name (e.g., 'Pungli', 'Premanisme')"
-              ),
-              polda_name: z.string().optional().describe("Filter by Polda name"),
-              polres_name: z.string().optional().describe("Filter by Polres name"),
-              officer_name: z.string().optional().describe("Filter by officer name"),
+              category: z
+                .string()
+                .optional()
+                .describe(
+                  "Filter by report category name (e.g., 'Pungli', 'Premanisme')",
+                ),
+              polda_name: z
+                .string()
+                .optional()
+                .describe("Filter by Polda name"),
+              polres_name: z
+                .string()
+                .optional()
+                .describe("Filter by Polres name"),
+              officer_name: z
+                .string()
+                .optional()
+                .describe("Filter by officer name"),
             }),
             execute: async ({
               category,
@@ -289,12 +325,13 @@ Deno.serve(async (req) => {
             description:
               "Get aggregated statistics about reports. Use for questions about report distribution, top categories, top locations, etc.",
             parameters: z.object({
-              group_by: z.enum(["category", "polda", "polres", "officer"]).describe(
-                "What to group the reports by"
-              ),
-              limit: z.number().optional().describe(
-                "Maximum number of results to return (default 10)"
-              ),
+              group_by: z
+                .enum(["category", "polda", "polres", "officer"])
+                .describe("What to group the reports by"),
+              limit: z
+                .number()
+                .optional()
+                .describe("Maximum number of results to return (default 10)"),
             }),
             execute: async ({
               group_by,
