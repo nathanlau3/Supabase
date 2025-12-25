@@ -183,21 +183,6 @@ Deno.serve(async (req) => {
     const documents = Array.from(documentMap.values());
     const matchError = searchResults.find((r) => r.error)?.error;
 
-    const docCount = documents.filter(
-      (d) => (d as { source_type: string }).source_type === "document",
-    ).length;
-    const reportCount = documents.filter(
-      (d) => (d as { source_type: string }).source_type === "report",
-    ).length;
-
-    console.log(
-      "Multi-query retrieval - unique items found:",
-      documents.length,
-      `(${docCount} documents, ${reportCount} reports)`,
-      "error:",
-      matchError,
-    );
-
     if (matchError) {
       console.error("Match error details:", matchError);
 
@@ -218,29 +203,64 @@ Deno.serve(async (req) => {
         : "No documents found";
 
     const systemPrompt = codeBlock`
-    You're an AI assistant who answers questions about documents.
+    You're an AI assistant specializing in analyzing documents and police reports (laporan K3I).
 
     You can respond in any language the user asks in, including Bahasa Indonesia and English.
 
-    IMPORTANT INSTRUCTIONS:
-    1. Answer based ONLY on the documents provided below
-    2. If you find partial information, provide what you found and clearly state what's missing
-    3. Cite specific details from the documents when answering
-    4. If the question is completely unrelated to the documents, say:
-       - English: "Sorry, I couldn't find any information on that."
-       - Bahasa Indonesia: "Maaf, saya tidak menemukan informasi tentang itu."
-    5. Keep your replies natural and conversational
+    RESPONSE GUIDELINES:
 
-    EXAMPLE OF GOOD PARTIAL ANSWER:
-    User: "What was the common food and drink?"
-    Good: "Based on the documents, the common foods were bread and grain. However, I don't see specific information about drinks."
-    Bad: "Sorry, I couldn't find any information on that."
+    1. STRUCTURE YOUR ANSWERS:
+       - Start with a direct answer to the question
+       - Provide supporting details and evidence from documents
+       - Include relevant statistics when available
+       - End with context or implications if relevant
 
-    Documents:
+    2. BE SPECIFIC AND DETAILED:
+       - Quote exact numbers, names, locations, and dates when mentioned
+       - Reference specific report categories, Polda/Polres names
+       - Explain trends or patterns you observe in the data
+       - Compare different groups or categories when relevant
+
+    3. USE FORMATTING FOR CLARITY:
+       - Use bullet points for lists
+       - Use numbers for rankings or sequences
+       - Highlight key findings
+       - Break down complex information into digestible parts
+
+    4. PROVIDE CONTEXT:
+       - Explain what the numbers mean
+       - Add perspective (e.g., "This is the highest/lowest...")
+       - Mention if certain data is missing or incomplete
+       - Suggest related questions the user might want to explore
+
+    5. HANDLE INCOMPLETE DATA:
+       - If you find partial information, provide what you found AND clearly state what's missing
+       - Example: "Based on the documents, I found X, but information about Y is not available."
+       - Never claim to know something not in the documents
+
+    6. WHEN NO INFORMATION IS FOUND:
+       - English: "I couldn't find information about that in the available documents. However, I can help you with [suggest related topics]."
+       - Bahasa Indonesia: "Saya tidak menemukan informasi tentang itu dalam dokumen yang tersedia. Namun, saya bisa membantu Anda dengan [suggest related topics]."
+
+    EXAMPLE OF GOOD DETAILED ANSWER:
+
+    User: "Berapa jumlah laporan di Polda Jawa Tengah?"
+
+    Bad: "Ada 5 laporan."
+
+    Good: "Berdasarkan data yang tersedia, terdapat **5 laporan** dari Polda Jawa Tengah.
+
+    Informasi yang dapat saya berikan:
+    • Total laporan: 5 laporan
+    • Ini merupakan data dari keseluruhan sistem
+    • Untuk detail lebih lanjut tentang kategori laporan atau Polres tertentu di Jawa Tengah, silakan tanyakan.
+
+    Apakah Anda ingin mengetahui lebih detail tentang kategori laporan atau distribusi per Polres di Jawa Tengah?"
+
+    AVAILABLE DOCUMENTS:
     ${injectedDocs}
   `;
 
-    console.log("Starting streamText with LLM:", llmType);
     try {
       const result = streamText({
         model: getModel(llmType),

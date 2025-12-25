@@ -9,6 +9,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function ChatPage() {
   const supabase = createClientComponentClient();
@@ -44,7 +46,6 @@ export default function ChatPage() {
       : {},
   });
 
-  // Keep inputRef in sync with input state
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
@@ -62,7 +63,6 @@ export default function ChatPage() {
     }
   }, [handleSubmit]);
 
-  // Speech Recognition (Speech-to-Text)
   const {
     isListening,
     isSupported: isSpeechRecognitionSupported,
@@ -79,7 +79,6 @@ export default function ChatPage() {
     handleFinish: submitVoiceInput,
   });
 
-  // Speech Synthesis (Text-to-Speech)
   const {
     speak,
     cancel,
@@ -181,7 +180,48 @@ export default function ChatPage() {
                 role === "user" ? "self-end bg-blue-600" : "self-start",
               )}
             >
-              {content}
+              {role === "assistant" ? (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // Customize rendering for better styling
+                      p: ({ children }) => (
+                        <p className="mb-2 last:mb-0">{children}</p>
+                      ),
+                      ul: ({ children }) => (
+                        <ul className="list-disc ml-4 mb-2">{children}</ul>
+                      ),
+                      ol: ({ children }) => (
+                        <ol className="list-decimal ml-4 mb-2">{children}</ol>
+                      ),
+                      li: ({ children }) => (
+                        <li className="mb-1">{children}</li>
+                      ),
+                      strong: ({ children }) => (
+                        <strong className="font-bold">{children}</strong>
+                      ),
+                      em: ({ children }) => (
+                        <em className="italic">{children}</em>
+                      ),
+                      code: ({ children }) => (
+                        <code className="bg-gray-700 px-1 py-0.5 rounded text-sm">
+                          {children}
+                        </code>
+                      ),
+                      pre: ({ children }) => (
+                        <pre className="bg-gray-700 p-2 rounded my-2 overflow-x-auto">
+                          {children}
+                        </pre>
+                      ),
+                    }}
+                  >
+                    {content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                content
+              )}
             </div>
           ))}
           {isLoading && (
