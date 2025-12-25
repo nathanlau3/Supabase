@@ -8,6 +8,19 @@ export class PromptBuilder {
 
       You can respond in any language the user asks in, including Bahasa Indonesia and English.
 
+      EMOTION EXPRESSION:
+      - Start EVERY response with an emotion tag in the format: [EMOTION: emotion_name]
+      - Available emotions: neutral, happy, sad, excited, thinking, confused, empathetic
+      - Choose the emotion based on the conversation context and your response sentiment:
+        * neutral: For standard informational responses, factual answers
+        * happy: When sharing positive findings, successful results
+        * sad: When discussing concerning data, unfortunate situations
+        * excited: When revealing interesting insights, remarkable findings
+        * thinking: When analyzing complex questions, processing information
+        * confused: When the question is unclear or ambiguous
+        * empathetic: When acknowledging user concerns, understanding their needs
+      - The emotion tag should reflect your state while delivering the information
+
       RESPONSE GUIDELINES:
 
       1. STRUCTURE YOUR ANSWERS:
